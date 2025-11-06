@@ -13,10 +13,10 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 type SpecialtyOption = { specialty_id: number; specialty_name: string };
-type DoctorOption = { doctor_id: number; doctor_name: string; specialty_id: number };
+type DoctorOption = { doctor_id: string; doctor_name: string; specialty_id: number };
 type ScheduleOption = {
   schedule_id: number;
-  doctor_id: number;
+  doctor_id: string;
   work_date: string; // yyyy-mm-dd
   start_time: string; // HH:mm:ss
   end_time: string; // HH:mm:ss
@@ -35,7 +35,7 @@ export default function BookingAppointmentPage() {
   const [schedules, setSchedules] = useState<ScheduleOption[]>([]);
 
   const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<number | "">("");
-  const [selectedDoctorId, setSelectedDoctorId] = useState<number | "">("");
+  const [selectedDoctorId, setSelectedDoctorId] = useState<string | "">("");
   const [appointmentDate, setAppointmentDate] = useState<string>("");
   const [appointmentStart, setAppointmentStart] = useState<string>("");
   const [appointmentEnd, setAppointmentEnd] = useState<string>("");
@@ -82,10 +82,15 @@ export default function BookingAppointmentPage() {
       setSpecialties(specs || []);
 
       // Nạp danh sách bác sĩ (kèm specialty_id)
-      const { data: docs } = await supabase
+      const { data: docs, error: docsErr } = await supabase
         .from("doctors")
         .select("doctor_id, doctor_name, specialty_id")
         .order("doctor_name", { ascending: true });
+
+      if (docsErr) {
+        console.error("Failed to load doctors:", docsErr);
+        toast.error("Không thể tải danh sách bác sĩ. Vui lòng kiểm tra quyền truy cập hoặc RLS.");
+      }
 
       setDoctors(docs || []);
       setLoading(false);
@@ -101,12 +106,16 @@ export default function BookingAppointmentPage() {
         return;
       }
       const supabase = createClient();
-      const { data: sch } = await supabase
+      const { data: sch, error: schErr } = await supabase
         .from("doctor_schedule")
         .select("schedule_id, doctor_id, work_date, start_time, end_time, is_available")
         .eq("doctor_id", selectedDoctorId)
         .eq("is_available", true)
         .order("work_date", { ascending: true });
+      if (schErr) {
+        console.error("Failed to load schedules:", schErr);
+        toast.error("Không thể tải lịch làm việc của bác sĩ.");
+      }
       setSchedules(sch || []);
     };
     fetchSchedules();
@@ -243,7 +252,7 @@ export default function BookingAppointmentPage() {
         .from("booking_appointment")
         .insert([
           {
-            doctor_id: Number(selectedDoctorId),
+            doctor_id: selectedDoctorId as string,
             patient_id: patientId,
             schedule_id: Number(selectedSchedule?.schedule_id),
             appointment_date: appointmentDate, // yyyy-mm-dd
@@ -370,7 +379,7 @@ export default function BookingAppointmentPage() {
               <Select
                 value={selectedDoctorId === "" ? undefined : String(selectedDoctorId)}
                 onValueChange={(val) => {
-                  const id = val ? Number(val) : "";
+                  const id = val ? String(val) : "";
                   setSelectedDoctorId(id);
                   const doc = doctors.find((d) => d.doctor_id === id);
                   if (doc) {
@@ -378,7 +387,7 @@ export default function BookingAppointmentPage() {
                   }
                 }}
               >
-                <SelectTrigger className={cn(inputClass)}>
+                <SelectTrigger className={cn(inputClass)} disabled={filteredDoctors.length === 0}>
                   <SelectValue placeholder="-- Select doctor --" />
                 </SelectTrigger>
                 <SelectContent>
@@ -389,6 +398,9 @@ export default function BookingAppointmentPage() {
                   ))}
                 </SelectContent>
               </Select>
+              {filteredDoctors.length === 0 && (
+                <p className="text-sm text-muted-foreground mt-1">Không có bác sĩ khả dụng. Hãy thêm dữ liệu hoặc kiểm tra quyền RLS.</p>
+              )}
               {errors.doctorId && <p className="text-sm text-destructive mt-1">{errors.doctorId}</p>}
             </div>
 

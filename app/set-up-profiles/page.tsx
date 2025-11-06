@@ -17,7 +17,6 @@ interface ProfileForm {
   gender: Gender;
   birthday: string; // ISO date yyyy-mm-dd
   phoneNumber: string;
-  address: string;
   identifyCode: string;
 }
 
@@ -31,7 +30,6 @@ export default function Page() {
     gender: "",
     birthday: "",
     phoneNumber: "",
-    address: "",
     identifyCode: "",
   });
   const [errors, setErrors] = useState<Partial<Record<keyof ProfileForm, string>>>({});
@@ -50,9 +48,9 @@ export default function Page() {
       // Check if user already has a profile (patients.id linked to auth.user_id)
       const { data: profile } = await supabase
         .from('patients')
-        .select('full_name, gender, dob, phone, citizen_id, id, address')
+        .select('full_name, gender, dob, phone, citizen_id, id')
         .eq('id', user.id)
-        .single();
+        .maybeSingle();
 
       setUserId(user.id);
 
@@ -60,26 +58,13 @@ export default function Page() {
         // Prefill form from existing profile (trigger-created record)
         setForm({
           fullName: profile.full_name ?? '',
-          gender: (profile.gender ?? '') as Gender,
+          gender: profile.gender,
           birthday: profile.dob ?? '',
           phoneNumber: profile.phone ?? '',
-          address: profile.address ?? '',
           identifyCode: profile.citizen_id ?? '',
         });
 
         // Determine if profile is complete; if complete, go to protected
-        const isComplete = Boolean(
-          (profile.full_name && String(profile.full_name).trim().length > 0) &&
-          (profile.gender && String(profile.gender).trim().length > 0) &&
-          (profile.dob && String(profile.dob).trim().length > 0) &&
-          (profile.phone && String(profile.phone).trim().length > 0) &&
-          (profile.citizen_id && String(profile.citizen_id).trim().length === 12)
-        );
-
-        if (isComplete) {
-          router.push('/protected');
-          return;
-        }
       }
 
       setLoading(false);
@@ -113,6 +98,23 @@ export default function Page() {
   const validateIdentifyCode = (code: string): boolean => {
     // Must be exactly 12 digits
     return /^\d{12}$/.test(code);
+  };
+
+  // Map giới tính giữa UI và DB
+  const toDbGender = (g: Gender): string | null => {
+    if (g === "Male") return "male";
+    if (g === "Female") return "female";
+    if (g === "Other") return "other";
+    return null;
+  };
+
+  const fromDbGender = (g: string | null): Gender => {
+    if (!g) return "";
+    const v = g.toLowerCase();
+    if (v === "male") return "Male";
+    if (v === "female") return "Female";
+    if (v === "other") return "Other";
+    return "";
   };
 
   const handleChange = (k: keyof ProfileForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -156,6 +158,7 @@ export default function Page() {
     try {
       setLoading(true);
       const supabase = createClient();
+      const dbGender = toDbGender(form.gender);
       
       // Không còn trigger tự tạo record. Tạo/cập nhật bằng upsert, ánh xạ id = auth.users.id
       const { data, error } = await supabase
@@ -168,12 +171,13 @@ export default function Page() {
           phone: form.phoneNumber,
           citizen_id: form.identifyCode,
         }, { onConflict: 'id' })
-        .select()
-        .single();
+        .select('id, patient_id')
+        .maybeSingle();
 
       if (error) {
         console.error("Error saving profile:", error);
-        toast.error("Failed to save profile. Please try again.");
+        const msg = [error.message, error.details, error.hint].filter(Boolean).join(" — ");
+        toast.error(msg || "Failed to save profile. Please try again.");
         return;
       }
 
@@ -266,19 +270,6 @@ export default function Page() {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="address">Address</Label>
-              <textarea
-                id="address"
-                value={form.address}
-                onChange={handleChange("address")}
-                rows={4}
-                className={cn("min-h-[88px] w-full rounded-md border bg-transparent px-3 py-2 text-sm shadow-xs border-input focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]")}
-                placeholder="Enter your full address"
-              />
-              {errors.address && <p className="text-sm text-destructive mt-1">{errors.address}</p>}
-            </div>
-
-            <div className="grid gap-2">
               <Label htmlFor="identifyCode">National ID Number</Label>
               <Input 
                 id="identifyCode" 
@@ -304,7 +295,6 @@ export default function Page() {
                     gender: "", 
                     birthday: "", 
                     phoneNumber: "",
-                    address: "", 
                     identifyCode: "" 
                   });
                   setErrors({});

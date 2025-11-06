@@ -77,7 +77,7 @@ export async function POST(req: Request) {
     const validIds = ids.filter((id) => specSet.has(id));
 
     return NextResponse.json({ specialty_ids: validIds });
-  } catch (err) {
+  } catch (err: any) {
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
