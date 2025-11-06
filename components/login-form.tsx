@@ -35,8 +35,33 @@ export function LoginForm({ className, ...props }: React.ComponentPropsWithoutRe
         password,
       })
       if (error) throw error
-      // Update this route to redirect to an authenticated route. The user already has an active session.
-      router.push('/protected')
+      // Sau khi đăng nhập, kiểm tra đã có bản ghi trong bảng patients chưa
+      const { data: userData, error: userErr } = await supabase.auth.getUser()
+      if (userErr || !userData?.user) {
+        router.push('/auth/login')
+        return
+      }
+
+      const userId = userData.user.id
+      const { data: patient, error: patientErr } = await supabase
+        .from('patients')
+        .select('id')
+        .eq('id', userId)
+        .maybeSingle()
+
+      if (patientErr) {
+        // Nếu lỗi truy vấn, fallback sang trang set-up-profiles
+        router.push('/set-up-profiles')
+        return
+      }
+
+      if (patient && patient.id) {
+        // Đã có hồ sơ -> vào trang bảo vệ
+        router.push('/protected')
+      } else {
+        // Chưa có hồ sơ -> chuyển tới trang tạo hồ sơ
+        router.push('/set-up-profiles')
+      }
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : 'An error occurred')
     } finally {
