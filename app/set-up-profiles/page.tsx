@@ -47,20 +47,41 @@ export default function Page() {
         return;
       }
 
-      // Check if user already has a profile
+      // Check if user already has a profile (patients.id linked to auth.user_id)
       const { data: profile } = await supabase
-        .from('patient')
-        .select('*')
-        .eq('user_id', user.id)
+        .from('patients')
+        .select('full_name, gender, dob, phone, citizen_id, id, address')
+        .eq('id', user.id)
         .single();
 
+      setUserId(user.id);
+
       if (profile) {
-        // User already has a profile, redirect to dashboard or home
-        router.push('/dashboard');
-        return;
+        // Prefill form from existing profile (trigger-created record)
+        setForm({
+          fullName: profile.full_name ?? '',
+          gender: (profile.gender ?? '') as Gender,
+          birthday: profile.dob ?? '',
+          phoneNumber: profile.phone ?? '',
+          address: profile.address ?? '',
+          identifyCode: profile.citizen_id ?? '',
+        });
+
+        // Determine if profile is complete; if complete, go to protected
+        const isComplete = Boolean(
+          (profile.full_name && String(profile.full_name).trim().length > 0) &&
+          (profile.gender && String(profile.gender).trim().length > 0) &&
+          (profile.dob && String(profile.dob).trim().length > 0) &&
+          (profile.phone && String(profile.phone).trim().length > 0) &&
+          (profile.citizen_id && String(profile.citizen_id).trim().length === 12)
+        );
+
+        if (isComplete) {
+          router.push('/protected');
+          return;
+        }
       }
 
-      setUserId(user.id);
       setLoading(false);
     };
 
@@ -118,9 +139,7 @@ export default function Page() {
       newErrors.phoneNumber = "Please enter a valid phone number (+84... or 0... with 9-11 digits)";
     }
     
-    if (!form.address.trim()) {
-      newErrors.address = "Address is required";
-    }
+    // Address is optional in current DB schema (patients table has no address column)
     
     if (!validateIdentifyCode(form.identifyCode)) {
       newErrors.identifyCode = "National ID must be exactly 12 digits";
@@ -138,19 +157,17 @@ export default function Page() {
       setLoading(true);
       const supabase = createClient();
       
+      // Không còn trigger tự tạo record. Tạo/cập nhật bằng upsert, ánh xạ id = auth.users.id
       const { data, error } = await supabase
-        .from("patient")
-        .insert([
-          {
-            id: userId,
-            full_name: form.fullName.trim(),
-            gender: form.gender,
-            dob: form.birthday,
-            phone: form.phoneNumber,
-            address: form.address.trim(),
-            citizen_id: form.identifyCode,
-          },
-        ])
+        .from("patients")
+        .upsert({
+          id: userId,
+          full_name: form.fullName.trim(),
+          gender: form.gender,
+          dob: form.birthday,
+          phone: form.phoneNumber,
+          citizen_id: form.identifyCode,
+        }, { onConflict: 'id' })
         .select()
         .single();
 
@@ -164,9 +181,9 @@ export default function Page() {
       setSubmitted(true);
       toast.success("Profile saved successfully!");
       
-      // Redirect to dashboard after successful profile creation
+      // Redirect to protected after successful profile creation
       setTimeout(() => {
-        router.push('/dashboard');
+        router.push('/protected');
       }, 1500);
     } catch (err) {
       console.error("Error:", err);

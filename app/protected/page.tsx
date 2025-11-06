@@ -11,6 +11,41 @@ export default async function ProtectedPage() {
     redirect('/auth/login')
   }
 
+  // Lấy user id từ claims (liên kết với patients.id)
+  const userId = String(data.claims.sub)
+
+  // Kiểm tra người dùng đã hoàn tất profile chưa
+  const { data: profiles, error: profileError } = await supabase
+    .from('patients')
+    .select('full_name, gender, dob, phone, citizen_id, id')
+    .eq('id', userId)
+    .limit(1)
+
+  if (profileError) {
+    // Có lỗi khi truy vấn profile, đưa người dùng sang trang set-up-profiles để xử lý
+    redirect('/set-up-profiles')
+  }
+
+  const hasProfile = Array.isArray(profiles) && profiles.length > 0
+  if (!hasProfile) {
+    // Chưa có profile thì điều hướng tới trang set-up-profiles trước
+    redirect('/set-up-profiles')
+  }
+
+  // Nếu có profile nhưng chưa đủ trường bắt buộc thì điều hướng tới set-up-profiles
+  const p = profiles[0]
+  const isComplete = Boolean(
+    (p.full_name && String(p.full_name).trim().length > 0) &&
+    (p.gender && String(p.gender).trim().length > 0) &&
+    (p.dob && String(p.dob).trim().length > 0) &&
+    (p.phone && String(p.phone).trim().length > 0) &&
+    (p.citizen_id && String(p.citizen_id).trim().length === 12)
+  )
+
+  if (!isComplete) {
+    redirect('/set-up-profiles')
+  }
+
   return (
     <div className="flex h-svh w-full items-center justify-center gap-2">
       <p>
