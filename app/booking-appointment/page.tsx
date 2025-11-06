@@ -231,7 +231,7 @@ export default function BookingAppointmentPage() {
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
-    if (!patientId) newErrors.patientId = "Missing patient ID.";
+    if (!userId) newErrors.patientId = "Missing authenticated patient ID.";
     if (!selectedDoctorId) newErrors.doctorId = "Please select a doctor.";
     if (!selectedSchedule) newErrors.scheduleId = "No available schedule for selected date.";
     if (selectedSlotIndex === null) newErrors.slot = "Please select a 30-minute slot.";
@@ -253,16 +253,16 @@ export default function BookingAppointmentPage() {
         return parts.length ? parts.join("\n") : null;
       })();
       const { data, error } = await supabase
-        .from("booking_appointment")
+        .from("appointment")
         .insert([
           {
-            doctor_id: selectedDoctorId as string,
-            patient_id: patientId,
-            schedule_id: Number(selectedSchedule?.schedule_id),
-            appointment_date: appointmentDate, // yyyy-mm-dd
-            appointment_start: appointmentStart + (appointmentStart.length === 5 ? ":00" : ""),
-            appointment_end: appointmentEnd + (appointmentEnd.length === 5 ? ":00" : ""),
-            status: "pending",
+            doctor_id: selectedDoctorId as string, // uuid
+            patient_id: userId as string, // uuid (patients.id / auth.user.id)
+            schedule_id: Number(selectedSchedule?.schedule_id), // int4
+            date: appointmentDate, // yyyy-mm-dd (date)
+            time: appointmentStart + (appointmentStart.length === 5 ? ":00" : ""), // HH:mm:ss (time)
+            status: "upcoming",
+            symptom: symptoms.trim() || null,
             note: composedNote,
           },
         ])
@@ -277,7 +277,7 @@ export default function BookingAppointmentPage() {
       }
 
       toast.success("Appointment booked successfully!");
-      router.push("/protected");
+      router.push("/view_appointment_list");
     } catch (err) {
       console.error(err);
       toast.error("An error occurred. Please try again.");

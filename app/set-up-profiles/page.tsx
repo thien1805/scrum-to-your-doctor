@@ -210,10 +210,8 @@ export default function Page() {
       setSubmitted(true);
       toast.success("Profile saved successfully!");
       
-      // Redirect to protected after successful profile creation
-      setTimeout(() => {
-        router.push('/protected');
-      }, 1500);
+      // Điều hướng ngay sau khi lưu hồ sơ thành công
+      router.push('/view_appointment_list');
     } catch (err) {
       console.error("Error:", err);
       toast.error("An unexpected error occurred. Please try again.");
