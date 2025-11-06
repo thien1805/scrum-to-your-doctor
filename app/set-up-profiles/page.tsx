@@ -1,0 +1,330 @@
+// ...existing code...
+"use client";
+import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
+import { createClient } from "@/lib/client";
+import { toast } from "sonner";
+
+type Gender = "Male" | "Female" | "Other" | "";
+
+interface ProfileForm {
+  fullName: string;
+  gender: Gender;
+  birthday: string; // ISO date yyyy-mm-dd
+  phoneNumber: string;
+  address: string;
+  identifyCode: string;
+}
+
+export default function Page() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
+  
+  const [form, setForm] = useState<ProfileForm>({
+    fullName: "",
+    gender: "",
+    birthday: "",
+    phoneNumber: "",
+    address: "",
+    identifyCode: "",
+  });
+  const [errors, setErrors] = useState<Partial<Record<keyof ProfileForm, string>>>({});
+  const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const supabase = createClient();
+      const { data: { user }, error } = await supabase.auth.getUser();
+
+      if (error || !user) {
+        router.push('/auth/login');
+        return;
+      }
+
+      // Check if user already has a profile (patients.id linked to auth.user_id)
+      const { data: profile } = await supabase
+        .from('patients')
+        .select('full_name, gender, dob, phone, citizen_id, id, address')
+        .eq('id', user.id)
+        .single();
+
+      setUserId(user.id);
+
+      if (profile) {
+        // Prefill form from existing profile (trigger-created record)
+        setForm({
+          fullName: profile.full_name ?? '',
+          gender: (profile.gender ?? '') as Gender,
+          birthday: profile.dob ?? '',
+          phoneNumber: profile.phone ?? '',
+          address: profile.address ?? '',
+          identifyCode: profile.citizen_id ?? '',
+        });
+
+        // Determine if profile is complete; if complete, go to protected
+        const isComplete = Boolean(
+          (profile.full_name && String(profile.full_name).trim().length > 0) &&
+          (profile.gender && String(profile.gender).trim().length > 0) &&
+          (profile.dob && String(profile.dob).trim().length > 0) &&
+          (profile.phone && String(profile.phone).trim().length > 0) &&
+          (profile.citizen_id && String(profile.citizen_id).trim().length === 12)
+        );
+
+        if (isComplete) {
+          router.push('/protected');
+          return;
+        }
+      }
+
+      setLoading(false);
+    };
+
+    checkAuth();
+  }, [router]);
+
+  const validateName = (name: string): boolean => {
+    return name.trim().length > 0 && name.trim().length <= 80;
+  };
+
+  const validatePhoneNumber = (phone: string): boolean => {
+    // Matches standard phone formats: +84... or 0... with 9-11 digits
+    const phoneRegex = /^(\+84|0)\d{9,11}$/;
+    return phoneRegex.test(phone);
+  };
+
+  const validateAge = (birthDate: string): boolean => {
+    if (!birthDate) return false;
+    const birth = new Date(birthDate);
+    const today = new Date();
+    let age = today.getFullYear() - birth.getFullYear();
+    const monthDiff = today.getMonth() - birth.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+      age--;
+    }
+    return age > 0;
+  };
+
+  const validateIdentifyCode = (code: string): boolean => {
+    // Must be exactly 12 digits
+    return /^\d{12}$/.test(code);
+  };
+
+  const handleChange = (k: keyof ProfileForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    setForm({ ...form, [k]: e.target.value });
+    setErrors((prev) => ({ ...prev, [k]: undefined }));
+  };
+
+  const validate = (): boolean => {
+    const newErrors: typeof errors = {};
+    
+    if (!validateName(form.fullName)) {
+      newErrors.fullName = "Full name must be between 1 and 80 characters";
+    }
+    
+    if (!form.gender) {
+      newErrors.gender = "Please select your gender";
+    }
+    
+    if (!validateAge(form.birthday)) {
+      newErrors.birthday = "Please enter a valid birth date (age must be positive)";
+    }
+    
+    if (!validatePhoneNumber(form.phoneNumber)) {
+      newErrors.phoneNumber = "Please enter a valid phone number (+84... or 0... with 9-11 digits)";
+    }
+    
+    // Address is optional in current DB schema (patients table has no address column)
+    
+    if (!validateIdentifyCode(form.identifyCode)) {
+      newErrors.identifyCode = "National ID must be exactly 12 digits";
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validate() || !userId) return;
+
+    try {
+      setLoading(true);
+      const supabase = createClient();
+      
+      // Không còn trigger tự tạo record. Tạo/cập nhật bằng upsert, ánh xạ id = auth.users.id
+      const { data, error } = await supabase
+        .from("patients")
+        .upsert({
+          id: userId,
+          full_name: form.fullName.trim(),
+          gender: form.gender,
+          dob: form.birthday,
+          phone: form.phoneNumber,
+          citizen_id: form.identifyCode,
+        }, { onConflict: 'id' })
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Error saving profile:", error);
+        toast.error("Failed to save profile. Please try again.");
+        return;
+      }
+
+      console.log("Profile saved successfully:", data);
+      setSubmitted(true);
+      toast.success("Profile saved successfully!");
+      
+      // Redirect to protected after successful profile creation
+      setTimeout(() => {
+        router.push('/protected');
+      }, 1500);
+    } catch (err) {
+      console.error("Error:", err);
+      toast.error("An unexpected error occurred. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const inputClass = "border-input h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]";
+
+  if (loading) {
+    return (
+      <main className="py-8 px-6 max-w-3xl mx-auto">
+        <Card>
+          <CardContent className="py-24 text-center">
+            Loading...
+          </CardContent>
+        </Card>
+      </main>
+    );
+  }
+
+  return (
+    <main className="py-8 px-6 max-w-3xl mx-auto">
+      <Card>
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl font-bold">Complete Your Profile</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="grid gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="fullName">Full Name</Label>
+              <Input 
+                id="fullName" 
+                value={form.fullName} 
+                onChange={handleChange("fullName")} 
+                placeholder="Enter your full name"
+                maxLength={80}
+              />
+              {errors.fullName && <p className="text-sm text-destructive mt-1">{errors.fullName}</p>}
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="gender">Gender</Label>
+              <select
+                id="gender"
+                value={form.gender}
+                onChange={handleChange("gender")}
+                className={cn(inputClass)}
+              >
+                <option value="">-- Select Gender --</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </select>
+              {errors.gender && <p className="text-sm text-destructive mt-1">{errors.gender}</p>}
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="birthday">Date of Birth</Label>
+              <Input 
+                id="birthday" 
+                type="date" 
+                value={form.birthday} 
+                onChange={handleChange("birthday")}
+              />
+              {errors.birthday && <p className="text-sm text-destructive mt-1">{errors.birthday}</p>}
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="phoneNumber">Phone Number</Label>
+              <Input 
+                id="phoneNumber" 
+                value={form.phoneNumber} 
+                onChange={handleChange("phoneNumber")} 
+                placeholder="Enter your phone number (e.g., +84... or 0...)"
+              />
+              {errors.phoneNumber && <p className="text-sm text-destructive mt-1">{errors.phoneNumber}</p>}
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="address">Address</Label>
+              <textarea
+                id="address"
+                value={form.address}
+                onChange={handleChange("address")}
+                rows={4}
+                className={cn("min-h-[88px] w-full rounded-md border bg-transparent px-3 py-2 text-sm shadow-xs border-input focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]")}
+                placeholder="Enter your full address"
+              />
+              {errors.address && <p className="text-sm text-destructive mt-1">{errors.address}</p>}
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="identifyCode">National ID Number</Label>
+              <Input 
+                id="identifyCode" 
+                value={form.identifyCode} 
+                onChange={handleChange("identifyCode")} 
+                placeholder="Enter your 12-digit National ID"
+                maxLength={12}
+              />
+              {errors.identifyCode && <p className="text-sm text-destructive mt-1">{errors.identifyCode}</p>}
+            </div>
+
+            <CardFooter className="gap-2">
+              <Button type="submit" disabled={loading}>
+                {loading ? "Saving..." : "Save and Continue"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={loading}
+                onClick={() => {
+                  setForm({ 
+                    fullName: "", 
+                    gender: "", 
+                    birthday: "", 
+                    phoneNumber: "",
+                    address: "", 
+                    identifyCode: "" 
+                  });
+                  setErrors({});
+                  setSubmitted(false);
+                }}
+              >
+                Clear
+              </Button>
+            </CardFooter>
+          </form>
+
+          {submitted && (
+            <section className="mt-4 p-3 border rounded-md bg-muted">
+              <strong>Saved Information:</strong>
+              <pre className="whitespace-pre-wrap mt-2">{JSON.stringify(form, null, 2)}</pre>
+            </section>
+          )}
+        </CardContent>
+      </Card>
+    </main>
+  );
+}
+// ...existing code...
