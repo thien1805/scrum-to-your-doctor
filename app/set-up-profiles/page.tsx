@@ -58,7 +58,7 @@ export default function Page() {
         // Prefill form from existing profile (trigger-created record)
         setForm({
           fullName: profile.full_name ?? '',
-          gender: profile.gender,
+          gender: fromDbGender(profile.gender),
           birthday: profile.dob ?? '',
           phoneNumber: profile.phone ?? '',
           identifyCode: profile.citizen_id ?? '',
@@ -102,19 +102,31 @@ export default function Page() {
 
   // Map giới tính giữa UI và DB
   const toDbGender = (g: Gender): string | null => {
-    if (g === "Male") return "male";
-    if (g === "Female") return "female";
-    if (g === "Other") return "other";
-    return null;
+    if (!g) return null;
+    switch (g) {
+      case "Male":
+        return "male";
+      case "Female":
+        return "female";
+      case "Other":
+        return "other";
+      default:
+        return null;
+    }
   };
 
-  const fromDbGender = (g: string | null): Gender => {
-    if (!g) return "";
-    const v = g.toLowerCase();
-    if (v === "male") return "Male";
-    if (v === "female") return "Female";
-    if (v === "other") return "Other";
-    return "";
+  const fromDbGender = (v?: string | null): Gender => {
+    if (!v) return "";
+    switch (String(v).toLowerCase()) {
+      case "male":
+        return "Male";
+      case "female":
+        return "Female";
+      case "other":
+        return "Other";
+      default:
+        return "";
+    }
   };
 
   const handleChange = (k: keyof ProfileForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -158,30 +170,43 @@ export default function Page() {
     try {
       setLoading(true);
       const supabase = createClient();
-      const dbGender = toDbGender(form.gender);
-      
-      // Không còn trigger tự tạo record. Tạo/cập nhật bằng upsert, ánh xạ id = auth.users.id
-      const { data, error } = await supabase
-        .from("patients")
-        .upsert({
-          id: userId,
-          full_name: form.fullName.trim(),
-          gender: form.gender,
-          dob: form.birthday,
-          phone: form.phoneNumber,
-          citizen_id: form.identifyCode,
-        }, { onConflict: 'id' })
-        .select('id, patient_id')
-        .maybeSingle();
+      // Chuẩn hóa payload; đảm bảo kiểu ngày hợp lệ và không gửi chuỗi rỗng
+      const payload = {
+        id: userId,
+        full_name: form.fullName.trim(),
+        gender: toDbGender(form.gender),
+        dob: form.birthday || null,
+        phone: form.phoneNumber.trim(),
+        citizen_id: form.identifyCode.trim(),
+      };
 
-      if (error) {
-        console.error("Error saving profile:", error);
-        const msg = [error.message, error.details, error.hint].filter(Boolean).join(" — ");
+      // Thực hiện upsert trước, không gọi select để tránh các lỗi hiển thị rỗng {}
+      const { error: upsertErr } = await supabase
+        .from("patients")
+        .upsert(payload, { onConflict: 'id' });
+
+      if (upsertErr && (upsertErr.message || upsertErr.details || upsertErr.hint || upsertErr.code)) {
+        console.error("Error saving profile:", upsertErr);
+        const msg = [upsertErr.message, upsertErr.details, upsertErr.hint].filter(Boolean).join(" — ");
         toast.error(msg || "Failed to save profile. Please try again.");
         return;
       }
 
-      console.log("Profile saved successfully:", data);
+      // Xác minh lại đã lưu bằng cách truy vấn theo id
+      const { data: verify, error: verifyErr } = await supabase
+        .from('patients')
+        .select('id, patient_id')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (verifyErr) {
+        console.error("Error verifying saved profile:", verifyErr);
+        const msg = [verifyErr.message, verifyErr.details, verifyErr.hint].filter(Boolean).join(" — ");
+        toast.error(msg || "Profile saved but verification failed.");
+        return;
+      }
+
+      console.log("Profile saved successfully:", verify);
       setSubmitted(true);
       toast.success("Profile saved successfully!");
       
@@ -305,13 +330,6 @@ export default function Page() {
               </Button>
             </CardFooter>
           </form>
-
-          {submitted && (
-            <section className="mt-4 p-3 border rounded-md bg-muted">
-              <strong>Saved Information:</strong>
-              <pre className="whitespace-pre-wrap mt-2">{JSON.stringify(form, null, 2)}</pre>
-            </section>
-          )}
         </CardContent>
       </Card>
     </main>

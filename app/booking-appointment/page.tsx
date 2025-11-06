@@ -60,11 +60,15 @@ export default function BookingAppointmentPage() {
       setUserId(user.id);
 
       // Lấy patient_id và tên bệnh nhân từ bảng patients (id = auth.user_id)
-      const { data: patient } = await supabase
+      const { data: patient, error: patErr } = await supabase
         .from("patients")
         .select("patient_id, full_name")
         .eq("id", user.id)
-        .single();
+        .maybeSingle();
+
+      if (patErr) {
+        console.warn("Could not load patient profile:", patErr);
+      }
 
       if (patient?.patient_id) {
         setPatientId(patient.patient_id);
@@ -263,11 +267,12 @@ export default function BookingAppointmentPage() {
           },
         ])
         .select()
-        .single();
+        .maybeSingle();
 
       if (error) {
+        const msg = [error.message, error.details, error.hint].filter(Boolean).join(" | ") || "Failed to create appointment.";
         console.error("Error creating appointment:", error);
-        toast.error("Failed to create appointment. Please try again.");
+        toast.error(msg);
         return;
       }
 
